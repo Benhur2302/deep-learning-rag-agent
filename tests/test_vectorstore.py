@@ -18,11 +18,15 @@ import pytest
 
 from rag_agent.agent.state import ChunkMetadata, DocumentChunk
 from rag_agent.vectorstore.store import VectorStoreManager
+from rag_agent.config import Settings
 
+def make_test_settings(chroma_db_path) -> Settings:
+    return Settings(
+        CHROMA_DB_PATH=str(chroma_db_path),
+        LLM_PROVIDER="groq",
+        EMBEDDING_PROVIDER="local",
+    )
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -118,33 +122,44 @@ class TestDuplicateDetection:
     """
 
     def test_new_chunk_is_not_duplicate(
-        self, tmp_path, sample_chunk: DocumentChunk
-    ) -> None:
+    self, tmp_path, sample_chunk: DocumentChunk
+) -> None:
         """A chunk that has never been ingested must not be flagged as duplicate."""
-        # TODO: implement using a test ChromaDB path in tmp_path
-        # store = VectorStoreManager(settings=test_settings(chroma_db_path=tmp_path))
-        # assert store.check_duplicate(sample_chunk.chunk_id) is False
-        pytest.skip("Implement after VectorStoreManager is complete")
+
+        store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
+
+        assert store.check_duplicate(sample_chunk.chunk_id) is False
+
 
     def test_ingested_chunk_is_duplicate(
         self, tmp_path, sample_chunk: DocumentChunk
     ) -> None:
-        """A chunk that has been ingested must be flagged as duplicate on re-check."""
-        # TODO: ingest chunk, then check_duplicate → True
-        pytest.skip("Implement after VectorStoreManager is complete")
+         """A chunk that has been ingested must be flagged as duplicate on re-check."""
+
+         store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
+
+         store.ingest([sample_chunk])
+
+         assert store.check_duplicate(sample_chunk.chunk_id) is True
 
     def test_ingestion_skips_duplicate(
         self, tmp_path, sample_chunk: DocumentChunk
     ) -> None:
-        """Ingesting the same chunk twice must result in skipped=1 on second call."""
-        # TODO: ingest once, ingest again, check IngestionResult.skipped == 1
-        pytest.skip("Implement after VectorStoreManager is complete")
+         """Ingesting the same chunk twice must result in skipped=1 on second call."""
 
+         store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
 
-# ---------------------------------------------------------------------------
-# Retrieval Tests
-# ---------------------------------------------------------------------------
+         first_result = store.ingest([sample_chunk])
+         second_result = store.ingest([sample_chunk])
 
+         assert first_result.ingested == 1
+         assert second_result.skipped == 1
 
 class TestRetrieval:
     """
@@ -158,19 +173,38 @@ class TestRetrieval:
         self, tmp_path, sample_chunk: DocumentChunk
     ) -> None:
         """A query semantically similar to an ingested chunk must return results."""
-        # TODO: ingest sample_chunk, query "LSTM gate mechanism", assert len > 0
-        pytest.skip("Implement after VectorStoreManager is complete")
+        store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
 
-    def test_irrelevant_query_returns_empty(self, tmp_path) -> None:
+        store.ingest([sample_chunk])
+
+        results = store.query(
+            query_text="LSTM gate mechanism",
+        )
+
+        assert len(results) > 0
+
+    def test_irrelevant_query_returns_empty(
+    self, tmp_path, sample_chunk: DocumentChunk
+) -> None:
         """
         A query with no semantic similarity to the corpus must return empty list.
 
         This tests the hallucination guard threshold. The system must return
         an empty list — not low-quality chunks — when nothing matches.
         """
-        # TODO: ingest sample_chunk, query "history of the roman empire"
-        # assert result == []
-        pytest.skip("Implement after VectorStoreManager is complete")
+        store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
+
+        store.ingest([sample_chunk])
+
+        result = store.query(
+            query_text="history of the roman empire",
+        )
+
+        assert result == []
 
     def test_topic_filter_restricts_results(
         self,
@@ -179,13 +213,41 @@ class TestRetrieval:
         bonus_chunk: DocumentChunk,
     ) -> None:
         """Results with topic_filter='LSTM' must not include GAN chunks."""
-        # TODO: ingest both chunks, query with topic_filter="LSTM"
-        # assert all(c.metadata.topic == "LSTM" for c in results)
-        pytest.skip("Implement after VectorStoreManager is complete")
+        store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
 
-    def test_results_sorted_by_score_descending(
-        self, tmp_path, sample_chunk: DocumentChunk
+        store.ingest([sample_chunk, bonus_chunk])
+
+        results = store.query(
+            query_text="LSTM gate mechanism",
+            topic_filter="LSTM",
+        )
+
+        assert len(results) > 0
+        assert all(
+            chunk.metadata.topic == "LSTM"
+            for chunk in results
+        )
+
+        def test_results_sorted_by_score_descending(
+        self,
+        tmp_path,
+        sample_chunk: DocumentChunk,
+        bonus_chunk: DocumentChunk,
     ) -> None:
-        """Retrieved chunks must be sorted with highest similarity first."""
-        # TODO: ingest multiple chunks, verify scores are non-increasing
-        pytest.skip("Implement after VectorStoreManager is complete")
+         """Retrieved chunks must be sorted with highest similarity first."""
+
+        store = VectorStoreManager(
+            settings=make_test_settings(chroma_db_path=tmp_path)
+        )
+
+        store.ingest([sample_chunk, bonus_chunk])
+
+        results = store.query(
+            query_text="LSTM gate mechanism",
+        )
+
+        scores = [chunk.score for chunk in results]
+
+        assert scores == sorted(scores, reverse=True)
